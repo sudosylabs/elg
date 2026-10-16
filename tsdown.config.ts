@@ -5,9 +5,11 @@ export default defineConfig({
   format: ["cjs", "esm"],
   dts: true,
   clean: true,
+  fixedExtension: false,
   outDir: "dist",
-  target: "node18",
+  target: "node22",
   platform: "node",
   tsconfig: "tsconfig.build.json",
-  external: ["bindings", "node-addon-api", "node-gyp-build", "electron"],
+  deps: { neverBundle: ["node-gyp-build"] },
+  outputOptions: { exports: "named" },
 });

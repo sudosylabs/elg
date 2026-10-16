@@ -8,8 +8,16 @@
     "rootDir": "js",
     "moduleResolution": "node",
     "allowImportingTsExtensions": false,
-    "verbatimModuleSyntax": false
+    "verbatimModuleSyntax": false,
+    "allowJs": false
   },
-  "include": ["js/**/*"],
-  "exclude": ["node_modules", "dist", "build", "examples"]
+  "include": [
+    "js/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "examples"
+  ]
 }

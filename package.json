@@ -1,16 +1,7 @@
 {
-  "name": "electron-liquid-glass",
-  "version": "1.1.1",
-  "description": "macOS glass / vibrancy wrapper for Electron BrowserWindow",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Meridius-Labs/electron-liquid-glass.git"
-  },
-  "bugs": {
-    "url": "https://github.com/Meridius-Labs/electron-liquid-glass/issues"
-  },
-  "homepage": "https://github.com/Meridius-Labs/electron-liquid-glass#readme",
-  "author": "Meridius Labs",
+  "name": "@vnilint/elg",
+  "version": "0.1.0-dev.0",
+  "description": "Owned native macOS Liquid Glass attachments for Electron windows",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -30,59 +21,64 @@
   },
   "files": [
     "dist",
-    "js",
-    "src",
-    "build/Release/*.node",
-    "prebuilds/**/*",
+    "prebuilds/**/*.node",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsdown",
-    "build:native": "prebuildify --napi --strip --tag-armv --arch=arm64 && prebuildify --napi --strip --arch=x64",
-    "build:all": "bun run build:native && bun run build",
-    "clean": "rimraf build prebuilds dist",
-    "prepack": "bun run build:all",
-    "dev": "bun run build:all && run-p watch-examples start",
-    "watch-examples": "tsc -w --project tsconfig.examples.json",
-    "start": "bun x electronmon ./dist-examples/electron.js",
-    "version:patch": "npm version patch",
-    "version:minor": "npm version minor",
-    "version:major": "npm version major",
-    "version:prerelease": "npm version prerelease",
-    "release": "bun run build:all && npm publish",
-    "release:dry": "bun run build:all && npm publish --dry-run"
+    "build:native": "node-gyp rebuild --devdir=.cache/node-gyp",
+    "build:prebuilds": "node scripts/build-prebuilds.mjs",
+    "build:all": "npm run build:native && npm run build",
+    "clean": "rimraf build prebuilds dist dist-examples",
+    "check": "tsc --noEmit --project tsconfig.build.json",
+    "test": "npm run build && node --test test/unit.test.mjs",
+    "test:native": "npm run build:all && node test/run-electron.mjs",
+    "example": "npm run build:all && tsc --project tsconfig.examples.json && electron dist-examples/electron.js",
+    "prepack": "npm run build && npm run check:package",
+    "check:package": "node scripts/check-package.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "test:package": "node test/package.mjs",
+    "prepublishOnly": "npm run check:release && npm run check && npm test && npm run check:package"
   },
   "keywords": [
     "electron",
     "macos",
-    "vibrancy",
-    "glass",
-    "nsvisualeffectview"
+    "liquid-glass",
+    "nsglasseffectview"
   ],
   "gypfile": false,
   "os": [
     "darwin"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22.18.0"
   },
   "dependencies": {
-    "bindings": "^1.5.0",
-    "node-addon-api": "^8.4.0"
-  },
-  "optionalDependencies": {
-    "node-gyp-build": "^4"
+    "node-gyp-build": "4.8.4"
   },
   "devDependencies": {
-    "@3c1u/bun-run-all": "^0.1.2",
-    "@types/node": "^20",
-    "electron": "^38",
-    "node-gyp": "^11.2.0",
-    "prebuildify": "^5",
-    "rimraf": "^5",
-    "tsdown": "^0.12.8",
+    "@electron/asar": "4.3.1",
+    "@types/node": "^22",
+    "electron": "44.8.0",
+    "node-addon-api": "8.9.2",
+    "node-gyp": "12.4.0",
+    "rimraf": "6.1.3",
+    "tsdown": "0.23.1",
     "typescript": "^5"
   },
-  "packageManager": "bun@1.2.23"
+  "packageManager": "npm@11.6.2",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sudosylabs/elg.git"
+  },
+  "homepage": "https://github.com/sudosylabs/elg#readme",
+  "bugs": {
+    "url": "https://github.com/sudosylabs/elg/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  }
 }
