@@ -9,10 +9,6 @@ updates:
       time: "09:00"
       timezone: "Etc/UTC"
     open-pull-requests-limit: 10
-    reviewers:
-      - "meridius-labs"
-    assignees:
-      - "meridius-labs"
     commit-message:
       prefix: "deps"
       include: "scope"
@@ -35,8 +31,6 @@ updates:
       time: "09:00"
       timezone: "Etc/UTC"
     open-pull-requests-limit: 5
-    reviewers:
-      - "meridius-labs"
     commit-message:
       prefix: "ci"
       include: "scope"

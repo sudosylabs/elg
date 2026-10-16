@@ -25,10 +25,14 @@ If applicable, add screenshots to help explain your problem.
 
 **Environment (please complete the following information):**
 
-- OS: [e.g. macOS 14.1]
-- Electron version: [e.g. 28.0.0]
-- Node.js version: [e.g. 20.10.0]
+- OS: [e.g. macOS 26.0]
+- Architecture: [arm64 or x64; native or Rosetta]
+- Electron version:
+- Node.js version:
 - Package version: [e.g. 0.1.0]
+- Installation: [source checkout, npm tarball, or packaged ASAR]
+- Reduce Transparency / Increase Contrast settings:
+- `isGlassSupported()` and `loadError` result (remove private paths/data):
 
 **Additional context**
 Add any other context about the problem here.
