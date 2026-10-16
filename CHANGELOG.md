@@ -1,98 +1,14 @@
 # Changelog
 
-## [1.1.1] - 2025-09-17
+## 0.1.0-dev.0 — Unreleased
 
-### Added
-- Release 1.1.1
+First prerelease preparation for `@vnilint/elg`, derived from Meridius Labs' MIT-licensed `electron-liquid-glass` 1.1.1. This package has a different API and is not a drop-in replacement.
 
-## [1.1.0] - 2025-09-09
-
-### Added
-- Release 1.1.0
-
-## [1.0.1] - 2025-06-27
-
-### Added
-- Release 1.0.1
-
-## [1.0.0] - 2025-06-27
-
-### Added
-- Release 1.0.0
-
-## [0.1.8] - 2025-06-17
-
-### Added
-- Release 0.1.8
-
-## [0.1.7] - 2025-06-17
-
-### Added
-- Release 0.1.7
-
-## [0.1.6] - 2025-06-17
-
-### Added
-- Release 0.1.6
-
-## [0.1.5] - 2025-06-17
-
-### Added
-- Release 0.1.5
-
-## [0.1.4] - 2025-06-17
-
-### Added
-- Release 0.1.4
-
-## [0.1.3] - 2025-06-17
-
-### Added
-- Release 0.1.3
-
-## [0.1.2] - 2025-06-17
-
-### Added
-- Release 0.1.2
-
-## [0.1.1] - 2025-06-17
-
-### Added
-- Release 0.1.1
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## 0.1.0
-
-### Added
-
-- Modern dual-package ESM/CJS build system with tsdown
-- Comprehensive GitHub Actions CI/CD pipeline
-- Automated dependency updates with Dependabot
-- TypeScript declarations for both ESM and CJS
-- Native macOS glass effects using NSGlassEffectView
-- Interactive example application with real-time controls
-- Support for glass variants, scrim states, and subdued states
-
-### Changed
-
-- Migrated from JavaScript to TypeScript source
-- Updated build system to use modern tooling
-- Enhanced README with comprehensive documentation
-
-### Security
-
-- Added security audit checks in CI pipeline
-- Configured automated vulnerability scanning
-
-## [0.1.0] - 2025-06-16
-
-### Added
-
-- Initial release
-- Basic glass effect functionality for Electron on macOS
-- Native NSGlassEffectView integration
-- Corner radius and tint color support
+- Use public macOS `NSGlassEffectView` properties with explicit per-instance ownership.
+- Add update, removal, disposal, window-close cleanup, and garbage-collection cleanup.
+- Validate native handles, IDs, options, and main-thread use.
+- Respect Reduce Transparency and Increase Contrast, removing existing attachments when glass becomes unavailable.
+- Load native code lazily and preserve load failures for diagnostics.
+- Ship ESM, CommonJS, TypeScript declarations, and Node-API 8 prebuilds for Apple Silicon and Intel.
+- Validate installed tarballs and unpacked ASAR applications, and add public-repository contribution and security guidance.
+- Remove the upstream unstable variant, scrim, subdued, and EventEmitter APIs. There is no legacy blur fallback.

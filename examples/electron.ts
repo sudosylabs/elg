@@ -1,86 +1,30 @@
-import { app, BrowserWindow, screen, ipcMain } from "electron";
-import myAddon from "../dist/index.js";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { app, BrowserWindow } from "electron";
+import liquidGlass from "../dist/index.js";
 
-let mainWindow: BrowserWindow;
-
-let viewId: number | null = null;
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-app.whenReady().then(() => {
-  mainWindow = new BrowserWindow({
+app.whenReady().then(async () => {
+  const window = new BrowserWindow({
     width: 800,
     height: 600,
-    x:
-      screen.getPrimaryDisplay().workArea.x +
-      screen.getPrimaryDisplay().workArea.width -
-      800,
-    y: screen.getPrimaryDisplay().workArea.y + 100,
-    frame: false,
+    titleBarStyle: "hiddenInset",
     transparent: true,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-    },
+    backgroundColor: "#00000000",
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
-
-  mainWindow.loadFile(path.join(__dirname, "../examples/index.html"));
-
-  // Once the DOM/renderer is ready show the glass effect
-  mainWindow.webContents.once("did-finish-load", () => {
-    try {
-      if (!myAddon) {
-        console.error("myAddon is not loaded");
-        return;
-      }
-
-      viewId = myAddon.addView(mainWindow.getNativeWindowHandle(), {
-        // opaque: true, // Add opaque background behind glass effect
-        // cornerRadius: 24,
-      });
-      mainWindow.setWindowButtonVisibility(true); // restore traffic lights
-
-      // Inform renderer that glass view is ready
-      mainWindow.webContents.send("glass-ready", { viewId });
-    } catch (err) {
-      console.error("addView failed:", err);
-    }
+  const id = liquidGlass.addView(window.getNativeWindowHandle(), { cornerRadius: 16 });
+  if (id < 0) window.setBackgroundColor("#202124");
+  window.setWindowButtonVisibility(true);
+  window.once("closed", () => {
+    if (id >= 0) liquidGlass.removeView(id);
   });
+  await window.loadURL("data:text/html," + encodeURIComponent(`
+    <html><head><title>Liquid Glass</title><style>
+      body { margin: 0; font: 16px system-ui; color: white; }
+      header { height: 70px; -webkit-app-region: drag; }
+      main { margin: 24px; padding: 24px; background: #202124; border-radius: 12px; }
+    </style></head><body><header></header><main>
+      <h1>Liquid Glass</h1><p>Native glass surrounds this opaque content surface.</p>
+      <p>${id >= 0 ? "Native glass attached" : "Opaque fallback (native glass unavailable)"}</p>
+    </main></body></html>`));
 });
-
-// Listen for renderer tweaks
-ipcMain.on("glass-set", (_event, { type, value }) => {
-  if (viewId === null) return;
-  try {
-    switch (type) {
-      case "variant":
-        myAddon.unstable_setVariant(viewId, value ?? 0);
-        break;
-      case "scrim":
-        myAddon.unstable_setScrim(viewId, value);
-        break;
-      case "subdued":
-        myAddon.unstable_setSubdued(viewId, value);
-        break;
-    }
-  } catch (err) {
-    console.error("glass-set failed", err);
-  }
-});
-
-// Standard quit handling
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
-
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    /* re-create */
-    mainWindow = new BrowserWindow({ width: 800, height: 600 });
-    mainWindow.loadFile(path.join(__dirname, "index.html"));
-  }
-});
+app.on("window-all-closed", () => app.quit());
+app.on("before-quit", () => liquidGlass.dispose());
