@@ -33,6 +33,8 @@ npm run check:release
 
 Both CPU binaries must be present before `npm pack`. Packing checks their Mach-O CPU headers and refuses a missing or incorrectly labeled prebuild. Build both with `npm run build:prebuilds`; this cross-compiles and does not prove Intel execution. CI runs the installed package on both `macos-26` and `macos-26-intel`. `macos-15` separately exercises unavailable-glass behavior. Supported runners must fail if glass is unavailable instead of silently skipping the lifecycle.
 
+GitHub's hosted macOS images enable Reduce Transparency to disable graphical effects. The shared `prepare-glass` action turns off Reduce Transparency and Increase Contrast only on disposable GitHub-hosted runners, then checks the actual AppKit class and accessibility policy with `test/host-support.swift`. It runs before both CI and publication tests. It does not bypass the addon's availability check or alter a developer Mac's settings.
+
 ## Release decision
 
 - Review all changes, retain the upstream MIT attribution, update the changelog, and choose the version. Keep prereleases on the `next` npm tag; change `publishConfig.tag` to `latest` only for a stable release.

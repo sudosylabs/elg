@@ -1,0 +1,16 @@
+name: Prepare native glass environment
+description: Enable and verify native glass on a disposable GitHub-hosted macOS runner
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        if [[ "$RUNNER_OS" != macOS || "$RUNNER_ENVIRONMENT" != github-hosted ]]; then
+          echo 'This setup changes accessibility preferences and is only for disposable GitHub-hosted macOS runners.' >&2
+          exit 1
+        fi
+        # runner-images enables Reduce Transparency to disable graphical effects.
+        # Test real AppKit glass rather than bypassing the addon's support check.
+        defaults write com.apple.universalaccess reduceTransparency -bool false
+        defaults write com.apple.universalaccess increaseContrast -bool false
+        swift -module-cache-path .cache/swift test/host-support.swift
