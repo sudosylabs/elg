@@ -1,117 +1,115 @@
-import { EventEmitter } from "events";
-import { execSync } from "child_process";
-import { GlassMaterialVariant } from "./variants.js";
-
-// Load the native addon using the 'bindings' module
-// This will look for the compiled .node file in various places
-import native from "./native-loader.js";
+import { loadNative } from "./native-loader.js";
 
 export interface GlassOptions {
   cornerRadius?: number;
+  /** sRGB #RRGGBB or #RRGGBBAA. Omit to clear a previous tint. */
   tintColor?: string;
   opaque?: boolean;
 }
 
-export interface LiquidGlassNative {
+export interface GlassNative {
+  isSupported(): boolean;
   addView(handle: Buffer, options: GlassOptions): number;
-  setVariant(id: number, variant: GlassMaterialVariant): void;
-  setScrimState(id: number, scrim: number): void;
-  setSubduedState(id: number, subdued: number): void;
+  updateView(id: number, options: GlassOptions): boolean;
+  removeView(id: number): boolean;
+  dispose(): void;
 }
 
-// Create a nice JavaScript wrapper
-class LiquidGlass extends EventEmitter {
-  private _addon?: LiquidGlassNative;
-  private _isGlassSupported: boolean | undefined;
+export interface GlassRuntime {
+  readonly platform: string;
+  readonly pointerSize: number;
+  load(): GlassNative;
+}
 
-  // Instance property for easy access to variants
-  readonly GlassMaterialVariant: typeof GlassMaterialVariant =
-    GlassMaterialVariant;
+const defaultRuntime: GlassRuntime = {
+  platform: process.platform,
+  pointerSize: 8,
+  load: loadNative,
+};
 
-  constructor() {
-    super();
+/** Main-process owner. A disposed owner cannot be reused. No Electron dependency. */
+export class LiquidGlass {
+  private addon: GlassNative | undefined;
+  private attemptedLoad = false;
+  private disposed = false;
+  private error: unknown;
 
-    try {
-      if (!this.isMacOS()) {
-        return;
+  constructor(private readonly runtime: GlassRuntime = defaultRuntime) {}
+
+  /** Native load failures are inspectable without logging or breaking app startup. */
+  get loadError(): unknown {
+    return this.error;
+  }
+
+  private getAddon(): GlassNative | undefined {
+    if (this.disposed || this.runtime.platform !== "darwin") return undefined;
+    if (!this.attemptedLoad) {
+      this.attemptedLoad = true;
+      try {
+        this.addon = this.runtime.load();
+      } catch (error) {
+        this.error = error;
       }
-
-      // Native addon uses liquid glass (macOS 26+)
-      // or falls back to legacy blur as needed.
-      this._addon = new native.LiquidGlassNative();
-    } catch (err) {
-      console.error(
-        "electron-liquid-glass failed to load its native addon – liquid glass functionality will be disabled.",
-        err
-      );
     }
+    return this.addon;
   }
 
-  private isMacOS(): boolean {
-    return process.platform === "darwin";
+  isGlassSupported(): boolean {
+    return this.getAddon()?.isSupported() ?? false;
   }
 
-  /**
-   * Check if liquid glass is supported on the current platform
-   * @returns true if liquid glass is supported on the current platform
-   */
-  public isGlassSupported(): boolean {
-    if (this._isGlassSupported !== undefined) return this._isGlassSupported;
-
-    const supported =
-      this.isMacOS() &&
-      Number(
-        execSync("sw_vers -productVersion").toString().trim().split(".")[0]
-      ) >= 26;
-
-    this._isGlassSupported = supported;
-    return supported;
-  }
-
-  /**
-   * Wrap the Electron window with a glass / vibrancy view.
-   *
-   * ⚠️ Will gracefully fall back to legacy macOS blur if liquid glass is not supported.
-   * @param handle BrowserWindow.getNativeWindowHandle()
-   * @param options Glass effect options
-   * @returns id – can be used for future API (remove/update), -1 if not supported
-   */
+  /** Only accepts a live Electron BrowserWindow handle; never accept renderer bytes. */
   addView(handle: Buffer, options: GlassOptions = {}): number {
-    if (!Buffer.isBuffer(handle)) {
-      throw new Error("[liquidGlass.addView] handle must be a Buffer");
+    if (!Buffer.isBuffer(handle) || handle.length !== this.runtime.pointerSize || handle.every(byte => byte === 0)) {
+      throw new TypeError("handle must be a non-null native window pointer Buffer");
     }
+    this.validateOptions(options);
+    const addon = this.getAddon();
+    if (!addon?.isSupported()) return -1;
+    return addon.addView(handle, options);
+  }
 
-    if (!this._addon) {
-      // unavailable on this platform
-      return -1;
+  /** Replaces all presentation options, including clearing an omitted tint. */
+  updateView(id: number, options: GlassOptions = {}): boolean {
+    this.validateId(id);
+    this.validateOptions(options);
+    return this.getAddon()?.updateView(id, options) ?? false;
+  }
+
+  /** Idempotent: false means this owner has no matching live attachment. */
+  removeView(id: number): boolean {
+    this.validateId(id);
+    return this.addon?.removeView(id) ?? false;
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.addon?.dispose();
+    this.disposed = true;
+    this.addon = undefined;
+  }
+
+  private validateId(id: number): void {
+    if (!Number.isInteger(id) || id < 0 || id > 0x7fffffff) {
+      throw new TypeError("view id must be a non-negative int32");
     }
-
-    return this._addon.addView(handle, options);
   }
 
-  private setVariant(id: number, variant: GlassMaterialVariant): void {
-    if (!this._addon || typeof this._addon.setVariant !== "function") return;
-    this._addon.setVariant(id, variant);
-  }
-
-  unstable_setVariant(id: number, variant: GlassMaterialVariant): void {
-    this.setVariant(id, variant);
-  }
-
-  unstable_setScrim(id: number, scrim: number): void {
-    if (!this._addon || typeof this._addon.setScrimState !== "function") return;
-    this._addon.setScrimState(id, scrim);
-  }
-
-  unstable_setSubdued(id: number, subdued: number): void {
-    if (!this._addon || typeof this._addon.setSubduedState !== "function")
-      return;
-    this._addon.setSubduedState(id, subdued);
+  private validateOptions(options: GlassOptions): void {
+    if (options === null || typeof options !== "object" || Array.isArray(options)) {
+      throw new TypeError("options must be an object");
+    }
+    if (options.cornerRadius !== undefined && (!Number.isFinite(options.cornerRadius) || options.cornerRadius < 0)) {
+      throw new TypeError("cornerRadius must be finite and non-negative");
+    }
+    if (options.tintColor !== undefined && (typeof options.tintColor !== "string" || !/^#(?:[\da-f]{6}|[\da-f]{8})$/i.test(options.tintColor))) {
+      throw new TypeError("tintColor must be #RRGGBB or #RRGGBBAA");
+    }
+    if (options.opaque !== undefined && typeof options.opaque !== "boolean") {
+      throw new TypeError("opaque must be a boolean");
+    }
   }
 }
 
-// Create and export the singleton instance
-// The class constructor handles platform checks internally
 const liquidGlass: LiquidGlass = new LiquidGlass();
-
 export default liquidGlass;

@@ -1,256 +1,196 @@
-#include "../include/Common.h"
-#include <napi.h>
-#import <objc/runtime.h>
-#import <objc/message.h>
-#include <string>
-#include <cctype>
-
-#ifdef PLATFORM_OSX
 #import <AppKit/AppKit.h>
+#include <map>
+#include <limits>
+#include "glass_effect.h"
 
-// Simple registry so JS can still address a view by numeric id.
-static std::map<int, NSView *> g_glassViews;
-static int g_nextViewId = 0;
+// Only public NSGlassEffectView properties. Runtime lookup permits older SDK/OS loads.
+@protocol VNLGlassProperties
+@property CGFloat cornerRadius;
+@property(strong) NSColor *tintColor;
+@end
 
-// Keys for objc-associated views on a container
-static const void *kGlassEffectKey = &kGlassEffectKey;
-static const void *kBackgroundViewKey = &kBackgroundViewKey;
+@interface VNLGlassAttachment : NSObject
+@property uint64_t owner;
+@property(weak) NSView *container;
+@property(strong) NSView<VNLGlassProperties> *glass;
+@property(strong) NSBox *background;
+@property(strong) id closeObserver;
+@property(strong) id accessibilityObserver;
+- (void)detach;
+@end
 
-// Utility: convert #RRGGBB or #RRGGBBAA to NSColor* (sRGB)
-static NSColor* ColorFromHexNSString(NSString* hex)
-{
-  NSString* cleaned = [[hex stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] uppercaseString];
-  if ([cleaned hasPrefix:@"#"]) cleaned = [cleaned substringFromIndex:1];
-  if (cleaned.length != 6 && cleaned.length != 8) return nil;
-
-  unsigned int rgba = 0;
-  NSScanner* scanner = [NSScanner scannerWithString:cleaned];
-  if (![scanner scanHexInt:&rgba]) return nil;
-
-  CGFloat r,g,b,a;
-  if (cleaned.length == 6) {
-    r = ((rgba & 0xFF0000) >> 16) / 255.0;
-    g = ((rgba & 0x00FF00) >> 8)  / 255.0;
-    b =  (rgba & 0x0000FF)        / 255.0;
-    a = 1.0;
-  } else {
-    r = ((rgba & 0xFF000000) >> 24) / 255.0;
-    g = ((rgba & 0x00FF0000) >> 16) / 255.0;
-    b = ((rgba & 0x0000FF00) >> 8)  / 255.0;
-    a =  (rgba & 0x000000FF)        / 255.0;
+@implementation VNLGlassAttachment
+- (void)detach {
+  if (self.closeObserver) {
+    [[NSNotificationCenter defaultCenter] removeObserver:self.closeObserver];
+    self.closeObserver = nil;
   }
-  return [NSColor colorWithRed:r green:g blue:b alpha:a];
+  if (self.accessibilityObserver) {
+    [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self.accessibilityObserver];
+    self.accessibilityObserver = nil;
+  }
+  [self.glass removeFromSuperview];
+  [self.background removeFromSuperview];
+  self.glass = nil;
+  self.background = nil;
+  self.container = nil;
+}
+@end
+
+// Accessed on AppKit's main thread only.
+// ARC does not retain ObjC objects inside C++ containers, so each entry is stored +1.
+static std::map<int, void *> attachments;
+static int64_t nextId = 0;
+static int supportOverride = 0;
+
+static VNLGlassAttachment *Peek(void *stored) {
+  return (__bridge VNLGlassAttachment *)stored;
 }
 
-#define RUN_ON_MAIN(block)                                  \
-  if ([NSThread isMainThread]) {                            \
-    block();                                                \
-  } else {                                                  \
-    dispatch_sync(dispatch_get_main_queue(), block);        \
-  }
-
-/*!
- * AddGlassEffectView
- * -----------------
- * Creates an `NSGlassEffectView` (private) and inserts it behind the contentView
- * of the supplied Electron window. The handle received from JavaScript is the
- * pointer to the Cocoa `NSView` that backs the BrowserWindow. The view is
- * retained in a small registry so that we can manipulate or remove it later if
- * required. The function returns an integer identifier that can be used from
- * JavaScript.
- *
- * Returns –1 on error.
- */
-extern "C" int AddGlassEffectView(unsigned char *buffer, bool opaque) {
-  if (!buffer) {
-    return -1;
-  }
-
-  __block int resultId = -1;
-
-  RUN_ON_MAIN(^{
-    NSView *rootView = *reinterpret_cast<NSView **>(buffer);
-    if (!rootView) return;
-
-    // Find the proper container - avoid NSThemeFrame
-    NSView *container = rootView;
-
-    // Remove previous glass and background views (if any)
-    NSView *oldGlass = objc_getAssociatedObject(container, kGlassEffectKey);
-    if (oldGlass) [oldGlass removeFromSuperview];
-    
-    NSView *oldBackground = objc_getAssociatedObject(container, kBackgroundViewKey);
-    if (oldBackground) [oldBackground removeFromSuperview];
-
-    NSRect bounds = container.bounds;
-
-    NSBox *backgroundView = nil;
-    
-
-    NSView *glass = nil;
-    Class glassCls = NSClassFromString(@"NSGlassEffectView");
-    if (glassCls) {
-      /**
-      * GLASS VIEW
-      */
-      glass = [[glassCls alloc] initWithFrame:bounds];
-
-      if (opaque) {
-        // Create a background view behind the glass view using NSBox for proper background color
-        backgroundView = [[NSBox alloc] initWithFrame:bounds];
-        backgroundView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-        backgroundView.boxType = NSBoxCustom;
-        backgroundView.borderType = NSNoBorder;
-        backgroundView.fillColor = [NSColor windowBackgroundColor];
-        backgroundView.wantsLayer = YES;
-        
-        
-        // Add the background view first (bottom layer)
-        [container addSubview:backgroundView positioned:NSWindowBelow relativeTo:nil];
-      }
-    } else {
-      /**
-      * FALLBACK VISUAL EFFECT VIEW
-      */
-      NSVisualEffectView *visual = [[NSVisualEffectView alloc] initWithFrame:bounds];
-      visual.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-      visual.blendingMode = NSVisualEffectBlendingModeBehindWindow;
-      visual.material = NSVisualEffectMaterialUnderWindowBackground;
-      visual.state = NSVisualEffectStateActive;
-      glass = visual;
-    }
-
-    // Ensure autoresize if we created a private glass view too
-    glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-
-    // Add the glass view (positioned relative to background view if opaque, or below everything if not)
-    if (opaque && backgroundView) {
-      [container addSubview:glass positioned:NSWindowAbove relativeTo:backgroundView];
-    } else {
-      [container addSubview:glass positioned:NSWindowBelow relativeTo:nil];
-    }
-    
-    // Associate views with the container for cleanup
-    objc_setAssociatedObject(container, kGlassEffectKey, glass, OBJC_ASSOCIATION_RETAIN);
-    if (backgroundView) {
-      objc_setAssociatedObject(container, kBackgroundViewKey, backgroundView, OBJC_ASSOCIATION_RETAIN);
-    } else {
-      objc_setAssociatedObject(container, kBackgroundViewKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    }
-
- 
-
-    int id = g_nextViewId++;
-    g_glassViews[id] = glass;
-    resultId = id;
-  });
-
-  return resultId;
+static void Take(std::map<int, void *>::iterator found) {
+  void *stored = found->second;
+  attachments.erase(found);
+  VNLGlassAttachment *entry = (__bridge_transfer VNLGlassAttachment *)stored;
+  [entry detach];
 }
 
-// Configure glass view by id
-extern "C" void ConfigureGlassView(int viewId, double cornerRadius, const char* tintHex) {
-  RUN_ON_MAIN(^{
-    auto it = g_glassViews.find(viewId);
-    if (it == g_glassViews.end()) return;
-    NSView* glass = it->second;
+bool GlassIsMainThread() { return [NSThread isMainThread]; }
 
-    // Corner radius via CALayer
-    glass.wantsLayer = YES;
-    glass.layer.cornerRadius = cornerRadius;
-    glass.layer.masksToBounds = YES;
-
-    // corner radius for the background view
-    NSView* container = glass.superview;
-    NSView* backgroundView = objc_getAssociatedObject(container, kBackgroundViewKey);
-    if (backgroundView) {
-      backgroundView.wantsLayer = YES;
-      backgroundView.layer.cornerRadius = cornerRadius;
-      backgroundView.layer.masksToBounds = YES;
-    }
-
-    if (tintHex && strlen(tintHex) > 0) {
-      NSString* hex = [NSString stringWithUTF8String:tintHex];
-      NSColor* c = ColorFromHexNSString(hex);
-      if (c && [glass respondsToSelector:@selector(setTintColor:)]) {
-        [(id)glass setTintColor:c];
-      } else if (c) {
-        glass.layer.backgroundColor = c.CGColor;
-      }
-    }
-  });
-}
-
-// -----------------------------------------------------------------------------
-// Dynamically set private properties on a previously created glass view
-// -----------------------------------------------------------------------------
-
-// Helper that converts a C-string key (e.g. "variant") into the Objective-C
-// selector for its private setter (e.g. set_variant:). It automatically adds
-// the leading underscore when missing.
-static SEL SetterFromKey(const std::string &key, bool privateVariant) {
-  std::string name;
-  if (privateVariant) {
-    // ensure leading underscore
-    if (!key.empty() && key.front() != '_')
-      name = "_" + key;
-    else
-      name = key;
-    name = "set" + name;
-  } else {
-    // camel-case public variant: set + CapitalizedFirst + rest
-    if (key.empty()) return nil;
-    name = "set";
-    name += toupper(key[0]);
-    name += key.substr(1);
+bool GlassIsSupported() {
+  if (supportOverride < 0) return false;
+  if (@available(macOS 26.0, *)) {
+    NSWorkspace *workspace = [NSWorkspace sharedWorkspace];
+    return NSClassFromString(@"NSGlassEffectView") != Nil
+      && !workspace.accessibilityDisplayShouldReduceTransparency
+      && !workspace.accessibilityDisplayShouldIncreaseContrast;
   }
-  name += ":";
-  return sel_registerName(name.c_str());
+  return false;
 }
 
-static SEL ResolveSetter(id obj, const char* cKey) {
-  if (!cKey) return nil;
-  std::string key(cKey);
-  if (key.empty()) return nil;
-  // Try private style first (set_<key>:)
-  SEL sel = SetterFromKey(key, true);
-  if ([obj respondsToSelector:sel]) return sel;
-  // Then try public style (setKey:)
-  sel = SetterFromKey(key, false);
-  if ([obj respondsToSelector:sel]) return sel;
+void GlassSetSupportOverride(int mode) { supportOverride = mode; }
+
+void GlassDeliverAccessibilityChange() {
+  [[[NSWorkspace sharedWorkspace] notificationCenter]
+    postNotificationName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+    object:nil];
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:0.2];
+  while ([NSDate.date compare:deadline] == NSOrderedAscending) {
+    [[NSRunLoop mainRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+  }
+}
+
+// Compare addresses of known live views. Never message/dereference the supplied pointer.
+static NSView *FindView(NSView *view, uintptr_t address) {
+  if (reinterpret_cast<uintptr_t>((__bridge void *)view) == address) return view;
+  for (NSView *child in view.subviews) {
+    NSView *found = FindView(child, address);
+    if (found) return found;
+  }
   return nil;
 }
 
-extern "C" void SetGlassViewIntProperty(int viewId, const char* key, long long value) {
-#ifdef PLATFORM_OSX
-  RUN_ON_MAIN(^{
-    auto it = g_glassViews.find(viewId);
-    if (it == g_glassViews.end()) return;
-    NSView* glass = it->second;
-
-    SEL sel = ResolveSetter(glass, key);
-    if (!sel) return;
-    if ([glass respondsToSelector:sel]) {
-      ((void (*)(id, SEL, long long))objc_msgSend)(glass, sel, value);
-    }
-  });
-#endif
+static NSColor *ColorFromHex(const char *hex) {
+  if (!hex || !*hex) return nil;
+  NSString *text = [NSString stringWithUTF8String:hex];
+  unsigned long long value = 0;
+  [[NSScanner scannerWithString:[text substringFromIndex:1]] scanHexLongLong:&value];
+  bool alpha = text.length == 9;
+  return [NSColor colorWithSRGBRed:((value >> (alpha ? 24 : 16)) & 255) / 255.0
+                            green:((value >> (alpha ? 16 : 8)) & 255) / 255.0
+                             blue:((value >> (alpha ? 8 : 0)) & 255) / 255.0
+                            alpha:alpha ? (value & 255) / 255.0 : 1.0];
 }
 
-extern "C" void SetGlassViewStringProperty(int viewId, const char* key, const char* value) {
-#ifdef PLATFORM_OSX
-  RUN_ON_MAIN(^{
-    auto it = g_glassViews.find(viewId);
-    if (it == g_glassViews.end()) return;
-    NSView* glass = it->second;
-
-    SEL sel = ResolveSetter(glass, key);
-    if (!sel) return;
-    if ([glass respondsToSelector:sel]) {
-      NSString* val = value ? [NSString stringWithUTF8String:value] : @"";
-      ((void (*)(id, SEL, id))objc_msgSend)(glass, sel, val);
-    }
-  });
-#endif
+bool RemoveGlassEffectView(uint64_t owner, int id) {
+  auto found = attachments.find(id);
+  if (found == attachments.end() || Peek(found->second).owner != owner) return false;
+  Take(found);
+  return true;
 }
-#endif // PLATFORM_OSX 
+
+void RemoveGlassEffectViews(uint64_t owner) {
+  auto remove = ^{
+    for (auto it = attachments.begin(); it != attachments.end();) {
+      if (Peek(it->second).owner != owner) { ++it; continue; }
+      void *stored = it->second;
+      it = attachments.erase(it);
+      VNLGlassAttachment *entry = (__bridge_transfer VNLGlassAttachment *)stored;
+      [entry detach];
+    }
+  };
+  if (GlassIsMainThread()) remove();
+  else dispatch_async(dispatch_get_main_queue(), remove);
+}
+
+bool UpdateGlassEffectView(uint64_t owner, int id, GlassPresentation presentation) {
+  auto found = attachments.find(id);
+  if (found == attachments.end() || Peek(found->second).owner != owner) return false;
+  VNLGlassAttachment *entry = Peek(found->second);
+  if (!GlassIsSupported()) {
+    RemoveGlassEffectView(owner, id);
+    return false;
+  }
+  if (!entry.container || !entry.container.window) {
+    RemoveGlassEffectView(owner, id);
+    return false;
+  }
+  entry.glass.cornerRadius = presentation.radius;
+  entry.glass.tintColor = ColorFromHex(presentation.tint);
+  if (presentation.opaque && !entry.background) {
+    NSBox *background = [[NSBox alloc] initWithFrame:entry.container.bounds];
+    background.boxType = NSBoxCustom;
+    background.borderWidth = 0;
+    background.fillColor = [NSColor windowBackgroundColor];
+    background.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    background.accessibilityElement = NO;
+    entry.background = background;
+    [entry.container addSubview:background positioned:NSWindowBelow relativeTo:entry.glass];
+  } else if (!presentation.opaque && entry.background) {
+    [entry.background removeFromSuperview];
+    entry.background = nil;
+  }
+  if (entry.background) {
+    entry.background.wantsLayer = YES;
+    entry.background.layer.cornerRadius = presentation.radius;
+    entry.background.layer.masksToBounds = YES;
+  }
+  return true;
+}
+
+int AddGlassEffectView(uint64_t owner, uintptr_t handle, GlassPresentation presentation) {
+  if (!GlassIsSupported() || !NSApp || nextId > INT32_MAX) return -1;
+  NSView *container = nil;
+  for (NSWindow *window in NSApp.windows) {
+    container = FindView(window.contentView, handle);
+    if (container) break;
+  }
+  if (!container || !container.window) return -1;
+  for (const auto &pair : attachments) {
+    VNLGlassAttachment *existing = Peek(pair.second);
+    if (existing.container == container) {
+      if (existing.owner != owner) return -1;
+      return UpdateGlassEffectView(owner, pair.first, presentation) ? pair.first : -1;
+    }
+  }
+  NSView<VNLGlassProperties> *glass = [[NSClassFromString(@"NSGlassEffectView") alloc] initWithFrame:container.bounds];
+  if (!glass) return -1;
+  glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  glass.accessibilityElement = NO;
+  VNLGlassAttachment *entry = [VNLGlassAttachment new];
+  entry.owner = owner;
+  entry.container = container;
+  entry.glass = glass;
+  int id = static_cast<int>(nextId++);
+  attachments.emplace(id, (__bridge_retained void *)entry);
+  [container addSubview:glass positioned:NSWindowBelow relativeTo:nil];
+  entry.closeObserver = [[NSNotificationCenter defaultCenter]
+    addObserverForName:NSWindowWillCloseNotification object:container.window queue:nil
+    usingBlock:^(NSNotification *) { RemoveGlassEffectView(owner, id); }];
+  entry.accessibilityObserver = [[[NSWorkspace sharedWorkspace] notificationCenter]
+    addObserverForName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification object:nil queue:[NSOperationQueue mainQueue]
+    usingBlock:^(NSNotification *) {
+      if (!GlassIsSupported()) RemoveGlassEffectView(owner, id);
+    }];
+  if (!UpdateGlassEffectView(owner, id, presentation)) return -1;
+  return id;
+}
