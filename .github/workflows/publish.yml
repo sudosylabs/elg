@@ -44,4 +44,4 @@ jobs:
           name: npm-package
           path: artifacts/*.tgz
           if-no-files-found: error
-      - run: npm publish artifacts/*.tgz --access public --provenance
+      - run: npm publish ./artifacts/*.tgz --access public --provenance --tag "$(node -p "require('./package.json').publishConfig.tag")"
