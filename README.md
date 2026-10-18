@@ -1,96 +1,113 @@
-# @vnilint/elg
+# elg
 
-Native macOS Liquid Glass for Electron windows. From the main process, attach an `NSGlassEffectView` behind a `BrowserWindow`. Transparent HTML shows the glass. Opaque HTML covers it.
+[![Validate](https://github.com/sudosylabs/elg/actions/workflows/ci.yml/badge.svg)](https://github.com/sudosylabs/elg/actions/workflows/ci.yml)
 
-**Prerelease preparation; not published yet.** The package is configured for public publication under `@vnilint/elg`, initially on npm's `next` tag. See [release requirements](docs/RELEASING.md) before using it in a production app.
+Native macOS Liquid Glass for Electron windows.
 
-Derived from [Meridius Labs' electron-liquid-glass](https://github.com/Meridius-Labs/electron-liquid-glass), under the MIT license. This fork has a different API; the upstream variant, scrim, subdued, and EventEmitter APIs are not available.
+`elg` attaches an `NSGlassEffectView` behind a `BrowserWindow`'s web content. Transparent parts of your page show the glass and opaque parts cover it.
+
+> **Status:** pre-release. The package isn't on npm yet and the API may still change.
+
+This is a fork of [electron-liquid-glass](https://github.com/Meridius-Labs/electron-liquid-glass) by Meridius Labs, with a smaller API focused on explicit ownership and cleanup. It isn't a drop-in replacement.
 
 ## Requirements
 
-- macOS 26 or later, with Reduce Transparency and Increase Contrast turned off.
-- Electron main process. Node.js 22.18 or later, npm 11.6.2, and Xcode command-line tools for development.
-- Darwin only. On Windows and Linux, keep your own window material or an opaque background.
+- macOS 26 or later. On older versions, or when Reduce Transparency or Increase Contrast is on, glass is unavailable and `addView` returns `-1`.
+- Electron main process.
+- Apple Silicon or Intel. Prebuilt binaries ship for both, so you don't need a compiler.
 
-For a cross-platform application, declare this Darwin-only package in `optionalDependencies` and load it conditionally from the macOS main-process path. A required dependency would make npm reject installation on Windows/Linux.
+## Install
 
-The addon uses public `NSGlassEffectView` properties. On an unsupported system, `addView` returns `-1`. Callers choose the fallback color.
+Until it's published, build a tarball from this repo:
 
-Published tarballs contain Node-API 8 binaries for `darwin-arm64` and `darwin-x64`. Consumers need no compiler or install-time build. Keep the `prebuilds` directory when bundling. Until publication, build both prebuilds and use `npm pack` to install a local tarball.
+```sh
+npm ci
+npm run build:prebuilds
+npm pack
+```
+
+Then install it in your app:
+
+```sh
+npm install ./vnilint-elg-0.1.0-dev.0.tgz
+```
+
+The package is macOS-only. If your app also targets Windows or Linux, put it in `optionalDependencies` and only import it on macOS.
 
 ## Usage
 
 ```ts
+import { app, BrowserWindow } from 'electron';
 import { LiquidGlass } from '@vnilint/elg';
 
-// After app.whenReady(), in the Electron main process:
-const glass = new LiquidGlass();
-const window = new BrowserWindow({
-  transparent: true,
-  backgroundColor: '#00000000',
-  titleBarStyle: 'hiddenInset',
-  webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+app.whenReady().then(() => {
+  const window = new BrowserWindow({
+    transparent: true,
+    backgroundColor: '#00000000',
+    titleBarStyle: 'hiddenInset',
+  });
+
+  const glass = new LiquidGlass();
+  const id = glass.addView(window.getNativeWindowHandle(), { cornerRadius: 16 });
+  if (id < 0) window.setBackgroundColor('#202124'); // fallback when glass is unavailable
+
+  window.once('closed', () => glass.dispose());
 });
-const id = glass.addView(window.getNativeWindowHandle(), { cornerRadius: 16 });
-if (id < 0) window.setBackgroundColor('#202124');
-window.once('closed', () => glass.dispose());
 ```
 
-Leave Electron `vibrancy` unset. Glass fills the window behind the web content. It does not create separate glass regions in the DOM.
+Leave Electron's `vibrancy` option unset. The glass fills the whole window; it doesn't create separate glass regions in the DOM.
 
-Pass the native handle from trusted main-process code. The binding checks that address against live AppKit windows. Keep keyboard and drag regions as usual, and check resize, traffic lights, and fullscreen on the Electron version you ship.
+### Keep a reference to the `LiquidGlass` instance
 
-Externalize this package from the Electron main bundle. Load it from the main process only. `node-gyp-build` is a required runtime dependency. Packaged apps need the native binary unpacked from the ASAR, the license included, and a signed, notarized launch checked on each architecture you ship.
+When an instance is garbage-collected, it removes all the glass it attached. If nothing holds a reference to it, the glass can disappear at a random moment without an error. Holding only the returned `id` doesn't keep the instance alive.
+
+In the example above, the `'closed'` listener's closure keeps `glass` alive. If you don't register a listener like that, store the instance yourself, for example in a `Map` keyed by window. The default export is a shared instance that is never collected.
+
+### Accessibility changes
+
+If the user turns on Reduce Transparency or Increase Contrast, existing glass is removed. When they turn it back off, the glass is not reattached automatically. Listen for the change in your app, for example with Electron's `nativeTheme`, then show your fallback or call `addView` again.
 
 ## API
 
-Use one `LiquidGlass` instance per window. That instance owns its attachments. The default export is a shared owner. `dispose()` on it is permanent.
+Use one `LiquidGlass` instance per window. Each instance only manages the attachments it created.
 
-Imports do not load the addon and do not print to the console.
-
-| Method | Behavior |
+| Method | Description |
 | --- | --- |
-| `isGlassSupported(): boolean` | Loads the addon on first use and checks native availability and accessibility settings. Returns `false` when the addon is missing. `loadError` keeps the load failure. |
-| `addView(handle, options?): number` | Attaches glass, or updates the attachment this owner already has on that window. Returns `-1` when glass is unavailable, the window is closed, this owner is disposed, or another instance already owns the window. A renderer reload does not need a new attachment. |
-| `updateView(id, options?): boolean` | Replaces presentation options. An omitted radius, tint, or opacity resets to `0`, no tint, and transparent. Returns `false` when this owner has no live attachment with that id. |
-| `removeView(id): boolean` | Detaches one attachment. A second removal returns `false`. |
-| `dispose(): void` | Releases every attachment owned by this instance and refuses later loads. A call that throws, including a call from a worker, leaves the owner active so it can be retried on the main thread. Call it when the window closes. Native garbage collection also removes leftovers. |
+| `isGlassSupported()` | Whether glass can be shown right now. Returns `false` if the native addon failed to load; check `loadError` to see why. |
+| `addView(handle, options?)` | Attaches glass to a window and returns its id. Calling it again on the same window updates the existing attachment. Returns `-1` if glass is unavailable, the window is closed, or another instance already owns the window. |
+| `updateView(id, options?)` | Replaces the options. Any option you leave out resets to its default. Returns `false` if the attachment no longer exists. |
+| `removeView(id)` | Removes one attachment. Returns `false` if it was already removed. |
+| `dispose()` | Removes every attachment from this instance. The instance can't be reused afterwards. |
 
-`GlassOptions`:
+Options:
 
-- `cornerRadius`: finite number, `0` or greater.
-- `tintColor`: `#RRGGBB` or `#RRGGBBAA`. Omit it to clear a tint.
-- `opaque`: boolean.
+- `cornerRadius`: a number `>= 0`. Default `0`.
+- `tintColor`: `#RRGGBB` or `#RRGGBBAA`. Default: no tint.
+- `opaque`: puts a solid window-colored backing behind the glass. Default `false`.
 
-Invalid options throw `TypeError`, including calls that reach the native binding directly.
+Invalid arguments throw a `TypeError`. Closing a window removes its glass automatically.
 
-Closing the window removes its attachment. Turning on Reduce Transparency or Increase Contrast removes current effects. Turning those settings back off does not reattach. Watch accessibility and theme changes in the app, apply an opaque fallback, and call `addView` again when glass should return. AppKit updates the material appearance. The renderer still owns palette and focus contrast.
+Importing the package doesn't load the native addon. It loads on the first call.
 
-Native calls run on the AppKit main thread. Calls from a worker are rejected. One owner cannot update or remove another owner's attachment.
+## Packaging your app
 
-## Build and test
+- Mark the package as external in your main-process bundler (Vite, webpack, etc.).
+- Unpack the `.node` binaries from the ASAR (for example `asarUnpack: ["**/*.node"]` in electron-builder) and keep the `prebuilds` directory.
+- Test a signed, notarized build on each architecture you ship.
+- Only pass handles from your own `BrowserWindow` objects. Never accept a handle from a renderer or over IPC.
+
+## Development
 
 ```sh
 npm ci
-npm run check
-npm test
-npm run test:native
-npm run build:prebuilds
-npm run test:package
-npm run example
+npm run check          # type check
+npm test               # unit tests
+npm run test:native    # native lifecycle tests in Electron (needs a macOS desktop session)
+npm run test:package   # installs the packed tarball and tests it, including inside an ASAR
+npm run example        # opens a demo window
 ```
 
-`npm run test:native` builds for the current architecture and runs an isolated Electron app with a temporary profile. It needs a real macOS desktop. On older macOS it checks the unavailable path and reports that the native glass lifecycle did not run. `GLASS_TEST_ELECTRON` selects another Electron executable.
-
-`npm run build:prebuilds` produces arm64 and x64 artifacts. A cross-compiled Intel binary still needs to be run on Intel.
-
-`npm run test:package` installs a real tarball with only production dependencies, checks ESM/CommonJS and TypeScript consumers, then tests the installed native binary both unpackaged and inside an ASAR with native binaries unpacked. `ELG_REQUIRE_SUPPORTED=1` makes these tests fail if glass is unavailable. CI separately targets macOS 26 on Apple Silicon and Intel, plus the macOS 15 fallback. CI results become available after this repository is created and pushed.
-
-Production compatibility also depends on your Electron version, UI, and signing configuration. Run the [application validation and release checklist](docs/RELEASING.md) for each architecture you ship. Automated lifecycle tests do not establish visual correctness or successful notarization.
-
-## Contributing and security
-
-See [Contributing](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md), [Security policy](SECURITY.md), and [Changelog](CHANGELOG.md). Report security issues privately through GitHub's security reporting flow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
 
