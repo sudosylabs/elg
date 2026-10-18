@@ -1,12 +1,13 @@
 # elg
 
+[![npm](https://img.shields.io/npm/v/@vnilink/elg/next)](https://www.npmjs.com/package/@vnilink/elg)
 [![Validate](https://github.com/sudosylabs/elg/actions/workflows/ci.yml/badge.svg)](https://github.com/sudosylabs/elg/actions/workflows/ci.yml)
 
 Native macOS Liquid Glass for Electron windows.
 
 `elg` attaches an `NSGlassEffectView` behind a `BrowserWindow`'s web content. Transparent parts of your page show the glass and opaque parts cover it.
 
-> **Status:** pre-release. The package isn't on npm yet and the API may still change.
+> **Status:** release candidate. The API may still change before 0.1.0.
 
 This is a fork of [electron-liquid-glass](https://github.com/Meridius-Labs/electron-liquid-glass) by Meridius Labs, with a smaller API focused on explicit ownership and cleanup. It isn't a drop-in replacement.
 
@@ -18,18 +19,8 @@ This is a fork of [electron-liquid-glass](https://github.com/Meridius-Labs/elect
 
 ## Install
 
-Until it's published, build a tarball from this repo:
-
 ```sh
-npm ci
-npm run build:prebuilds
-npm pack
-```
-
-Then install it in your app:
-
-```sh
-npm install ./vnilink-elg-0.1.0-dev.0.tgz
+npm install @vnilink/elg@next
 ```
 
 The package is macOS-only. If your app also targets Windows or Linux, put it in `optionalDependencies` and only import it on macOS.
