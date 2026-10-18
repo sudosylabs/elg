@@ -29,7 +29,7 @@ npm pack
 Then install it in your app:
 
 ```sh
-npm install ./vnilint-elg-0.1.0-dev.0.tgz
+npm install ./vnilink-elg-0.1.0-dev.0.tgz
 ```
 
 The package is macOS-only. If your app also targets Windows or Linux, put it in `optionalDependencies` and only import it on macOS.
@@ -38,7 +38,7 @@ The package is macOS-only. If your app also targets Windows or Linux, put it in 
 
 ```ts
 import { app, BrowserWindow } from 'electron';
-import { LiquidGlass } from '@vnilint/elg';
+import { LiquidGlass } from '@vnilink/elg';
 
 app.whenReady().then(() => {
   const window = new BrowserWindow({

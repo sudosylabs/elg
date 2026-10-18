@@ -2,7 +2,7 @@
 
 ## 0.1.0-dev.0 — Unreleased
 
-First prerelease preparation for `@vnilint/elg`, derived from Meridius Labs' MIT-licensed `electron-liquid-glass` 1.1.1. This package has a different API and is not a drop-in replacement.
+First prerelease preparation for `@vnilink/elg`, derived from Meridius Labs' MIT-licensed `electron-liquid-glass` 1.1.1. This package has a different API and is not a drop-in replacement.
 
 - Use public macOS `NSGlassEffectView` properties with explicit per-instance ownership.
 - Add update, removal, disposal, window-close cleanup, and garbage-collection cleanup.
