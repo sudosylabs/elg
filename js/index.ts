@@ -4,7 +4,34 @@ export interface GlassOptions {
   cornerRadius?: number;
   /** sRGB #RRGGBB or #RRGGBBAA. Omit to clear a previous tint. */
   tintColor?: string;
+  /**
+   * Puts the window's content material behind the glass, as AppKit does under a sidebar, so
+   * the glass refracts the window rather than the desktop and stays light or dark with it.
+   */
   opaque?: boolean;
+  /** Where the glass goes. Omit to cover the whole window. */
+  frame?: GlassFrame;
+}
+
+/** A rectangle in the window's content, in points from its top-left corner. */
+export interface GlassFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /**
+   * The window edges the glass keeps its distance to as the window resizes. Anchoring two
+   * opposite edges stretches it. Omit for top and left; an edge left out of the object is
+   * not anchored.
+   */
+  anchors?: GlassAnchors;
+}
+
+export interface GlassAnchors {
+  top?: boolean;
+  right?: boolean;
+  bottom?: boolean;
+  left?: boolean;
 }
 
 export interface GlassNative {
@@ -107,6 +134,26 @@ export class LiquidGlass {
     }
     if (options.opaque !== undefined && typeof options.opaque !== "boolean") {
       throw new TypeError("opaque must be a boolean");
+    }
+    if (options.frame !== undefined) this.validateFrame(options.frame);
+  }
+
+  private validateFrame(frame: GlassFrame): void {
+    if (frame === null || typeof frame !== "object" || Array.isArray(frame)) {
+      throw new TypeError("frame must be an object");
+    }
+    for (const field of [frame.x, frame.y, frame.width, frame.height]) {
+      if (typeof field !== "number" || !Number.isFinite(field) || field < 0) {
+        throw new TypeError("frame x, y, width and height must be finite and non-negative");
+      }
+    }
+    const anchors = frame.anchors;
+    if (anchors === undefined) return;
+    if (anchors === null || typeof anchors !== "object" || Array.isArray(anchors)) {
+      throw new TypeError("frame anchors must be an object");
+    }
+    for (const edge of [anchors.top, anchors.right, anchors.bottom, anchors.left]) {
+      if (edge !== undefined && typeof edge !== "boolean") throw new TypeError("frame anchors must be booleans");
     }
   }
 }

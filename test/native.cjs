@@ -51,7 +51,9 @@ app.whenReady().then(async () => {
     });
     const window = create();
     const handle = window.getNativeWindowHandle();
-    for (const options of [{ cornerRadius: NaN }, { cornerRadius: -1 }, { tintColor: '#112233zz' }, { opaque: 1 }, null, []]) {
+    for (const options of [{ cornerRadius: NaN }, { cornerRadius: -1 }, { tintColor: '#112233zz' }, { opaque: 1 }, null, [],
+      { frame: null }, { frame: { x: 0, y: 0, width: 10 } }, { frame: { x: -1, y: 0, width: 10, height: 10 } },
+      { frame: { x: 0, y: 0, width: 10, height: 10, anchors: [] } }, { frame: { x: 0, y: 0, width: 10, height: 10, anchors: { left: 'yes' } } }]) {
       assert.throws(() => native.addView(handle, options), TypeError);
       assert.throws(() => native.updateView(0, options), TypeError);
     }
@@ -84,6 +86,41 @@ app.whenReady().then(async () => {
     assert.equal(owner.removeView(id), true);
     assert.equal(owner.removeView(id), false);
     assert.equal(owner.updateView(id), false);
+    const framedWindow = create();
+    framedWindow.setContentSize(600, 400);
+    const framedHandle = framedWindow.getNativeWindowHandle();
+    const settle = () => new Promise(resolve => setImmediate(resolve));
+    const whole = native.addView(framedHandle, {});
+    const strip = native.addView(framedHandle, { frame: { x: 0, y: 0, width: 600, height: 40, anchors: { top: true, left: true, right: true } } });
+    const panel = native.addView(framedHandle, { opaque: true, cornerRadius: 12, frame: { x: 8, y: 48, width: 200, height: 344, anchors: { top: true, bottom: true, left: true } } });
+    assert(whole >= 0 && strip >= 0 && panel >= 0);
+    assert.equal(new Set([whole, strip, panel]).size, 3, 'framed views are separate attachments');
+    assert.equal(native.addView(framedHandle, {}), whole, 'the whole-window view stays unique beside framed views');
+    assert.deepEqual(native.testingDescribeView(whole), { x: 0, y: 0, width: 600, height: 400, backed: false, order: 0 });
+    assert.deepEqual(native.testingDescribeView(strip), { x: 0, y: 0, width: 600, height: 40, backed: false, order: 1 });
+    assert.deepEqual(native.testingDescribeView(panel), { x: 8, y: 48, width: 200, height: 344, backed: true, order: 2 }, 'later views stack above earlier ones');
+    framedWindow.setContentSize(800, 500);
+    await settle();
+    assert.deepEqual(native.testingDescribeView(whole), { x: 0, y: 0, width: 800, height: 500, backed: false, order: 0 });
+    assert.deepEqual(native.testingDescribeView(strip), { x: 0, y: 0, width: 800, height: 40, backed: false, order: 1 }, 'left and right anchors stretch the width');
+    assert.deepEqual(native.testingDescribeView(panel), { x: 8, y: 48, width: 200, height: 444, backed: true, order: 2 }, 'top and bottom anchors stretch the height');
+    const corner = native.addView(framedHandle, { frame: { x: 700, y: 400, width: 50, height: 50, anchors: { right: true, bottom: true } } });
+    const floating = native.addView(framedHandle, { frame: { x: 100, y: 100, width: 50, height: 50 } });
+    framedWindow.setContentSize(900, 600);
+    await settle();
+    assert.deepEqual(native.testingDescribeView(corner), { x: 800, y: 500, width: 50, height: 50, backed: false, order: 3 }, 'right and bottom anchors keep the distance to those edges');
+    assert.deepEqual(native.testingDescribeView(floating), { x: 100, y: 100, width: 50, height: 50, backed: false, order: 4 }, 'frames default to top and left anchors');
+    assert.equal(native.updateView(panel, {}), false, 'a framed view cannot become a whole-window view');
+    assert.equal(native.updateView(whole, { frame: { x: 0, y: 0, width: 10, height: 10 } }), false, 'a whole-window view cannot become framed');
+    assert.equal(native.testingDescribeView(panel).backed, true, 'a refused update leaves the view as it was');
+    assert.equal(native.updateView(panel, { frame: { x: 8, y: 48, width: 240, height: 300 } }), true);
+    assert.deepEqual(native.testingDescribeView(panel), { x: 8, y: 48, width: 240, height: 300, backed: false, order: 2 }, 'an update replaces the frame and clears an omitted backing');
+    assert.equal(other.addView(framedHandle, { frame: { x: 0, y: 0, width: 10, height: 10 } }), -1, 'another owner cannot add framed views to an owned window');
+    assert.equal(native.removeView(strip), true);
+    assert.equal(native.testingDescribeView(strip), undefined);
+    assert.equal(native.testingDescribeView(panel).order, 1, 'removing a view keeps the others in order');
+    framedWindow.destroy();
+    for (const view of [whole, panel, corner, floating]) assert.equal(native.testingDescribeView(view), undefined, 'window close removes every framed view');
     const policyId = owner.addView(handle, { cornerRadius: 4 });
     assert(policyId >= 0);
     native.testingSetSupportOverride(false);
@@ -152,7 +189,7 @@ app.whenReady().then(async () => {
     window.destroy();
     assert.equal(native.addView(stale, {}), -1, 'closed-window handles must be rejected');
     native.dispose(); native.dispose();
-    console.log('Native validation, ownership, 100 attach/remove cycles, 20 window-close cycles, updates, reload, GC cleanup and disposal passed.');
+    console.log('Native validation, ownership, framed views and anchors, 100 attach/remove cycles, 20 window-close cycles, updates, reload, GC cleanup and disposal passed.');
   } finally {
     try { native.testingSetSupportOverride(null); } catch { /* runner enables the test seam */ }
     owner.dispose(); other.dispose(); native.dispose();

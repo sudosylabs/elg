@@ -14,6 +14,7 @@
 @property(weak) NSView *container;
 @property(strong) NSView<VNLGlassProperties> *glass;
 @property(strong) NSVisualEffectView *background;
+@property bool framed;
 @property(strong) id closeObserver;
 @property(strong) id accessibilityObserver;
 - (void)detach;
@@ -101,6 +102,49 @@ static NSColor *ColorFromHex(const char *hex) {
                             alpha:alpha ? (value & 255) / 255.0 : 1.0];
 }
 
+// The glass views (and backings) in `container`, bottom first, as they are stacked.
+static NSArray<NSView *> *GlassViewsIn(NSView *container) {
+  NSMutableArray<NSView *> *views = [NSMutableArray array];
+  for (NSView *child in container.subviews) {
+    for (const auto &pair : attachments) {
+      VNLGlassAttachment *entry = Peek(pair.second);
+      if (entry.container == container && (entry.glass == child || entry.background == child)) {
+        [views addObject:child];
+        break;
+      }
+    }
+  }
+  return views;
+}
+
+// Places the view's glass and backing in the content, and anchors them to its edges.
+static void ApplyFrame(VNLGlassAttachment *entry, const GlassPresentation &presentation) {
+  NSView *container = entry.container;
+  NSRect rect = container.bounds;
+  NSAutoresizingMaskOptions mask = NSViewWidthSizable | NSViewHeightSizable;
+  if (presentation.framed) {
+    const GlassFrame &frame = presentation.frame;
+    CGFloat y = container.isFlipped ? frame.y : NSHeight(container.bounds) - frame.y - frame.height;
+    rect = NSMakeRect(frame.x, y, frame.width, frame.height);
+    // A margin that is not anchored is the one that absorbs a resize.
+    NSAutoresizingMaskOptions topMargin = container.isFlipped ? NSViewMinYMargin : NSViewMaxYMargin;
+    NSAutoresizingMaskOptions bottomMargin = container.isFlipped ? NSViewMaxYMargin : NSViewMinYMargin;
+    mask = 0;
+    if (frame.left && frame.right) mask |= NSViewWidthSizable;
+    else if (frame.left) mask |= NSViewMaxXMargin;
+    else if (frame.right) mask |= NSViewMinXMargin;
+    else mask |= NSViewMinXMargin | NSViewMaxXMargin;
+    if (frame.top && frame.bottom) mask |= NSViewHeightSizable;
+    else if (frame.top) mask |= bottomMargin;
+    else if (frame.bottom) mask |= topMargin;
+    else mask |= topMargin | bottomMargin;
+  }
+  entry.glass.frame = rect;
+  entry.glass.autoresizingMask = mask;
+  entry.background.frame = rect;
+  entry.background.autoresizingMask = mask;
+}
+
 bool RemoveGlassEffectView(uint64_t owner, int id) {
   auto found = attachments.find(id);
   if (found == attachments.end() || Peek(found->second).owner != owner) return false;
@@ -134,16 +178,17 @@ bool UpdateGlassEffectView(uint64_t owner, int id, GlassPresentation presentatio
     RemoveGlassEffectView(owner, id);
     return false;
   }
+  // A view keeps the kind it was created with: framed, or covering the whole window.
+  if (presentation.framed != entry.framed) return false;
   entry.glass.cornerRadius = presentation.radius;
   entry.glass.tintColor = ColorFromHex(presentation.tint);
   if (presentation.opaque && !entry.background) {
     // The backing AppKit puts under a sidebar's glass: the window's content material,
     // blended within the window, so the glass refracts the window rather than the desktop.
-    NSVisualEffectView *background = [[NSVisualEffectView alloc] initWithFrame:entry.container.bounds];
+    NSVisualEffectView *background = [[NSVisualEffectView alloc] initWithFrame:entry.glass.frame];
     background.material = NSVisualEffectMaterialContentBackground;
     background.blendingMode = NSVisualEffectBlendingModeWithinWindow;
     background.state = NSVisualEffectStateActive;
-    background.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     background.accessibilityElement = NO;
     entry.background = background;
     [entry.container addSubview:background positioned:NSWindowBelow relativeTo:entry.glass];
@@ -151,6 +196,7 @@ bool UpdateGlassEffectView(uint64_t owner, int id, GlassPresentation presentatio
     [entry.background removeFromSuperview];
     entry.background = nil;
   }
+  ApplyFrame(entry, presentation);
   if (entry.background) {
     entry.background.wantsLayer = YES;
     entry.background.layer.cornerRadius = presentation.radius;
@@ -167,24 +213,30 @@ int AddGlassEffectView(uint64_t owner, uintptr_t handle, GlassPresentation prese
     if (container) break;
   }
   if (!container || !container.window) return -1;
+  // One owner per window. A whole-window view is unique, so adding it again updates it;
+  // framed views are added as often as they are asked for.
   for (const auto &pair : attachments) {
     VNLGlassAttachment *existing = Peek(pair.second);
-    if (existing.container == container) {
-      if (existing.owner != owner) return -1;
+    if (existing.container != container) continue;
+    if (existing.owner != owner) return -1;
+    if (!presentation.framed && !existing.framed) {
       return UpdateGlassEffectView(owner, pair.first, presentation) ? pair.first : -1;
     }
   }
   NSView<VNLGlassProperties> *glass = [[NSClassFromString(@"NSGlassEffectView") alloc] initWithFrame:container.bounds];
   if (!glass) return -1;
-  glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   glass.accessibilityElement = NO;
+  // Later views stack above earlier ones, and all stay below the web content.
+  NSView *topmost = GlassViewsIn(container).lastObject;
   VNLGlassAttachment *entry = [VNLGlassAttachment new];
   entry.owner = owner;
   entry.container = container;
   entry.glass = glass;
+  entry.framed = presentation.framed;
   int id = static_cast<int>(nextId++);
   attachments.emplace(id, (__bridge_retained void *)entry);
-  [container addSubview:glass positioned:NSWindowBelow relativeTo:nil];
+  if (topmost) [container addSubview:glass positioned:NSWindowAbove relativeTo:topmost];
+  else [container addSubview:glass positioned:NSWindowBelow relativeTo:nil];
   entry.closeObserver = [[NSNotificationCenter defaultCenter]
     addObserverForName:NSWindowWillCloseNotification object:container.window queue:nil
     usingBlock:^(NSNotification *) { RemoveGlassEffectView(owner, id); }];
@@ -195,4 +247,26 @@ int AddGlassEffectView(uint64_t owner, uintptr_t handle, GlassPresentation prese
     }];
   if (!UpdateGlassEffectView(owner, id, presentation)) return -1;
   return id;
+}
+
+bool GlassDescribeView(uint64_t owner, int id, GlassViewState &state) {
+  auto found = attachments.find(id);
+  if (found == attachments.end() || Peek(found->second).owner != owner) return false;
+  VNLGlassAttachment *entry = Peek(found->second);
+  NSView *container = entry.container;
+  if (!container) return false;
+  NSRect frame = entry.glass.frame;
+  state.x = NSMinX(frame);
+  state.y = container.isFlipped ? NSMinY(frame) : NSHeight(container.bounds) - NSMaxY(frame);
+  state.width = NSWidth(frame);
+  state.height = NSHeight(frame);
+  state.backed = entry.background != nil;
+  NSMutableArray<NSView *> *glasses = [NSMutableArray array];
+  for (NSView *view in GlassViewsIn(container)) {
+    for (const auto &pair : attachments) {
+      if (Peek(pair.second).glass == view) { [glasses addObject:view]; break; }
+    }
+  }
+  state.order = static_cast<int>([glasses indexOfObject:entry.glass]);
+  return true;
 }

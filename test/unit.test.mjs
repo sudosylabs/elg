@@ -54,6 +54,13 @@ test('options are forwarded for explicit updates, clearing omitted properties', 
   assert.equal(owner.removeView(7), true);
   assert.deepEqual(calls, [['load'], ['add', handle, {tintColor:'#12345678', cornerRadius:8}], ['update',7,{}], ['remove',7]]);
 });
+test('a frame and its anchors are forwarded unchanged', () => {
+  const { owner, calls } = fixture();
+  const frame = { x: 8, y: 48, width: 200, height: 384, anchors: { top: true, bottom: true, left: true } };
+  assert.equal(owner.addView(handle, { cornerRadius: 12, opaque: true, frame }), 7);
+  assert.equal(owner.updateView(7, { frame: { x: 0, y: 0, width: 0, height: 0 } }), true);
+  assert.deepEqual(calls.slice(1), [['add', handle, { cornerRadius: 12, opaque: true, frame }], ['update', 7, { frame: { x: 0, y: 0, width: 0, height: 0 } }]]);
+});
 test('a failed dispose stays retryable', () => {
   const { owner, calls, native } = fixture();
   owner.addView(handle);
@@ -86,7 +93,11 @@ test('invalid handles, options and ids fail before native mutation', () => {
   for (const bad of [null, {}, Buffer.alloc(0), Buffer.alloc(7), Buffer.alloc(8), Buffer.alloc(9)]) {
     assert.throws(() => owner.addView(bad), TypeError);
   }
-  for (const bad of [null, [], {cornerRadius:-1}, {cornerRadius:NaN}, {cornerRadius:Infinity}, {tintColor:'#123456junk'}, {tintColor:4}, {opaque:1}]) {
+  for (const bad of [null, [], {cornerRadius:-1}, {cornerRadius:NaN}, {cornerRadius:Infinity}, {tintColor:'#123456junk'}, {tintColor:4}, {opaque:1},
+    {frame:null}, {frame:[]}, {frame:{x:0, y:0, width:10}}, {frame:{x:-1, y:0, width:10, height:10}},
+    {frame:{x:0, y:0, width:NaN, height:10}}, {frame:{x:0, y:0, width:10, height:Infinity}}, {frame:{x:'0', y:0, width:10, height:10}},
+    {frame:{x:0, y:0, width:10, height:10, anchors:null}}, {frame:{x:0, y:0, width:10, height:10, anchors:[]}},
+    {frame:{x:0, y:0, width:10, height:10, anchors:{top:1}}}]) {
     assert.throws(() => owner.addView(handle, bad), TypeError);
     assert.throws(() => owner.updateView(0, bad), TypeError);
   }

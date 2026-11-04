@@ -20,6 +20,7 @@ public:
       InstanceMethod("dispose", &LiquidGlassNative::Dispose),
       InstanceMethod("testingSetSupportOverride", &LiquidGlassNative::TestingSetSupportOverride),
       InstanceMethod("testingPostAccessibilityChange", &LiquidGlassNative::TestingPostAccessibilityChange),
+      InstanceMethod("testingDescribeView", &LiquidGlassNative::TestingDescribeView),
     }));
     return exports;
   }
@@ -54,7 +55,7 @@ private:
     return false;
   }
 
-  struct Options { double radius = 0; std::string tint; bool opaque = false; };
+  struct Options { double radius = 0; std::string tint; bool opaque = false; bool framed = false; GlassFrame frame; };
 
   bool ReadOptions(const Napi::CallbackInfo &info, size_t index, Options &out) {
     if (info.Length() <= index || info[index].IsUndefined()) return true;
@@ -67,6 +68,7 @@ private:
     auto radius = options.Get("cornerRadius");
     auto tint = options.Get("tintColor");
     auto opaque = options.Get("opaque");
+    auto frame = options.Get("frame");
     if (env.IsExceptionPending()) return false;
     if (!radius.IsUndefined()) {
       if (!radius.IsNumber() || !std::isfinite(radius.As<Napi::Number>().DoubleValue()) || radius.As<Napi::Number>().DoubleValue() < 0) {
@@ -88,6 +90,52 @@ private:
         return false;
       }
       out.opaque = opaque.As<Napi::Boolean>().Value();
+    }
+    if (!frame.IsUndefined()) {
+      if (!ReadFrame(env, frame, out.frame)) return false;
+      out.framed = true;
+    }
+    return true;
+  }
+
+  static bool IsPlainObject(const Napi::Value &value) {
+    return value.IsObject() && !value.IsNull() && !value.IsArray();
+  }
+
+  bool ReadFrame(Napi::Env env, const Napi::Value &value, GlassFrame &out) {
+    if (!IsPlainObject(value)) {
+      Napi::TypeError::New(env, "frame must be an object").ThrowAsJavaScriptException();
+      return false;
+    }
+    auto frame = value.As<Napi::Object>();
+    const char *names[] = {"x", "y", "width", "height"};
+    double *fields[] = {&out.x, &out.y, &out.width, &out.height};
+    for (int i = 0; i < 4; i++) {
+      auto field = frame.Get(names[i]);
+      if (env.IsExceptionPending()) return false;
+      if (!field.IsNumber() || !std::isfinite(field.As<Napi::Number>().DoubleValue()) || field.As<Napi::Number>().DoubleValue() < 0) {
+        Napi::TypeError::New(env, "frame x, y, width and height must be finite and non-negative").ThrowAsJavaScriptException();
+        return false;
+      }
+      *fields[i] = field.As<Napi::Number>().DoubleValue();
+    }
+    auto anchors = frame.Get("anchors");
+    if (env.IsExceptionPending()) return false;
+    if (anchors.IsUndefined()) return true;
+    if (!IsPlainObject(anchors)) {
+      Napi::TypeError::New(env, "frame anchors must be an object").ThrowAsJavaScriptException();
+      return false;
+    }
+    const char *edges[] = {"top", "right", "bottom", "left"};
+    bool *flags[] = {&out.top, &out.right, &out.bottom, &out.left};
+    for (int i = 0; i < 4; i++) {
+      auto edge = anchors.As<Napi::Object>().Get(edges[i]);
+      if (env.IsExceptionPending()) return false;
+      if (!edge.IsUndefined() && !edge.IsBoolean()) {
+        Napi::TypeError::New(env, "frame anchors must be booleans").ThrowAsJavaScriptException();
+        return false;
+      }
+      *flags[i] = !edge.IsUndefined() && edge.As<Napi::Boolean>().Value();
     }
     return true;
   }
@@ -143,7 +191,7 @@ private:
   }
 
   static GlassPresentation Presentation(const Options &options) {
-    return GlassPresentation{options.radius, options.tint.c_str(), options.opaque};
+    return GlassPresentation{options.radius, options.tint.c_str(), options.opaque, options.framed, options.frame};
   }
 
   bool RequireTesting(Napi::Env env) {
@@ -160,6 +208,23 @@ private:
     else if (info[0].IsBoolean() && !info[0].As<Napi::Boolean>().Value()) GlassSetSupportOverride(-1);
     else Napi::TypeError::New(env, "support override must be false or null").ThrowAsJavaScriptException();
     return env.Undefined();
+  }
+
+  Napi::Value TestingDescribeView(const Napi::CallbackInfo &info) {
+    auto env = info.Env();
+    if (!RequireTesting(env)) return env.Undefined();
+    int id;
+    if (!ReadId(info, id)) return env.Undefined();
+    GlassViewState state;
+    if (disposed || !GlassDescribeView(owner, id, state)) return env.Undefined();
+    auto result = Napi::Object::New(env);
+    result.Set("x", state.x);
+    result.Set("y", state.y);
+    result.Set("width", state.width);
+    result.Set("height", state.height);
+    result.Set("backed", state.backed);
+    result.Set("order", state.order);
+    return result;
   }
 
   Napi::Value TestingPostAccessibilityChange(const Napi::CallbackInfo &info) {

@@ -46,7 +46,22 @@ app.whenReady().then(() => {
 });
 ```
 
-Leave Electron's `vibrancy` option unset. The glass fills the whole window; it doesn't create separate glass regions in the DOM.
+Leave Electron's `vibrancy` option unset.
+
+### Glass in part of the window
+
+Without a `frame`, the glass fills the whole window. With one, it covers that rectangle, given in points from the top-left of the window's content. A window can have several framed views; each `addView` adds one, stacked above the earlier ones and below your page. Make the page transparent over each one.
+
+Frames aren't tied to the DOM. When your layout moves, call `updateView` with the new frame. `anchors` keeps the glass in place while the window resizes, so you don't need to update on every resize:
+
+```ts
+// A sidebar panel inset 8 points, below a 40-point strip, that grows with the window's height.
+glass.addView(handle, {
+  cornerRadius: 12,
+  opaque: true,
+  frame: { x: 8, y: 48, width: 200, height: 400, anchors: { top: true, bottom: true, left: true } },
+});
+```
 
 ### Backing
 
@@ -69,8 +84,8 @@ Use one `LiquidGlass` instance per window. Each instance only manages the attach
 | Method | Description |
 | --- | --- |
 | `isGlassSupported()` | Whether glass can be shown right now. Returns `false` if the native addon failed to load; check `loadError` to see why. |
-| `addView(handle, options?)` | Attaches glass to a window and returns its id. Calling it again on the same window updates the existing attachment. Returns `-1` if glass is unavailable, the window is closed, or another instance already owns the window. |
-| `updateView(id, options?)` | Replaces the options. Any option you leave out resets to its default. Returns `false` if the attachment no longer exists. |
+| `addView(handle, options?)` | Attaches glass to a window and returns its id. A window has at most one whole-window view, so adding one again updates it; each call with a `frame` adds a new view. Returns `-1` if glass is unavailable, the window is closed, or another instance already owns the window. |
+| `updateView(id, options?)` | Replaces the options. Any option you leave out resets to its default. Returns `false` if the attachment no longer exists, or if the update would turn a framed view into a whole-window view or back. |
 | `removeView(id)` | Removes one attachment. Returns `false` if it was already removed. |
 | `dispose()` | Removes every attachment from this instance. The instance can't be reused afterwards. |
 
@@ -79,6 +94,7 @@ Options:
 - `cornerRadius`: a number `>= 0`. Default `0`.
 - `tintColor`: `#RRGGBB` or `#RRGGBBAA`. Default: no tint.
 - `opaque`: puts the window's content material behind the glass, so it refracts the window instead of the desktop. Default `false`.
+- `frame`: `{ x, y, width, height, anchors? }` in points from the top-left of the window's content, each a number `>= 0`. Default: the whole window. `anchors` is `{ top?, right?, bottom?, left? }`, the edges the glass keeps its distance to when the window resizes; anchoring two opposite edges stretches it. Default `{ top: true, left: true }`.
 
 Invalid arguments throw a `TypeError`. Closing a window removes its glass automatically.
 
