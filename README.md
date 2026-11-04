@@ -48,6 +48,10 @@ app.whenReady().then(() => {
 
 Leave Electron's `vibrancy` option unset. The glass fills the whole window; it doesn't create separate glass regions in the DOM.
 
+### Backing
+
+Glass refracts what is behind it. With nothing behind it, that is the desktop, so over a dark wallpaper light-mode glass turns dark. `opaque: true` puts the window's content material behind the glass instead, as AppKit does under a sidebar. The glass then stays light or dark with your window.
+
 ### Keep a reference to the `LiquidGlass` instance
 
 When an instance is garbage-collected, it removes all the glass it attached. If nothing holds a reference to it, the glass can disappear at a random moment without an error. Holding only the returned `id` doesn't keep the instance alive.
@@ -74,7 +78,7 @@ Options:
 
 - `cornerRadius`: a number `>= 0`. Default `0`.
 - `tintColor`: `#RRGGBB` or `#RRGGBBAA`. Default: no tint.
-- `opaque`: puts a solid window-colored backing behind the glass. Default `false`.
+- `opaque`: puts the window's content material behind the glass, so it refracts the window instead of the desktop. Default `false`.
 
 Invalid arguments throw a `TypeError`. Closing a window removes its glass automatically.
 

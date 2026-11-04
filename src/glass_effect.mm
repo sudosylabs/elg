@@ -13,7 +13,7 @@
 @property uint64_t owner;
 @property(weak) NSView *container;
 @property(strong) NSView<VNLGlassProperties> *glass;
-@property(strong) NSBox *background;
+@property(strong) NSVisualEffectView *background;
 @property(strong) id closeObserver;
 @property(strong) id accessibilityObserver;
 - (void)detach;
@@ -137,10 +137,12 @@ bool UpdateGlassEffectView(uint64_t owner, int id, GlassPresentation presentatio
   entry.glass.cornerRadius = presentation.radius;
   entry.glass.tintColor = ColorFromHex(presentation.tint);
   if (presentation.opaque && !entry.background) {
-    NSBox *background = [[NSBox alloc] initWithFrame:entry.container.bounds];
-    background.boxType = NSBoxCustom;
-    background.borderWidth = 0;
-    background.fillColor = [NSColor windowBackgroundColor];
+    // The backing AppKit puts under a sidebar's glass: the window's content material,
+    // blended within the window, so the glass refracts the window rather than the desktop.
+    NSVisualEffectView *background = [[NSVisualEffectView alloc] initWithFrame:entry.container.bounds];
+    background.material = NSVisualEffectMaterialContentBackground;
+    background.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+    background.state = NSVisualEffectStateActive;
     background.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     background.accessibilityElement = NO;
     entry.background = background;

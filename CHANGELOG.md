@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `opaque` now puts the window's content material behind the glass, as AppKit does under a sidebar, instead of a solid window-coloured fill. Light glass no longer turns flat grey, and it stays light over a dark wallpaper.
+
 ## 0.1.0-rc — 2026-10-18
 
 First release candidate of `@vnilink/elg`, derived from Meridius Labs' MIT-licensed `electron-liquid-glass` 1.1.1. This package has a different API and is not a drop-in replacement.
