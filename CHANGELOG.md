@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-rc.1 — 2026-11-04
 
 - Add `frame` to place glass in part of a window, with `anchors` to follow window resizes. A window can have several framed views, stacked in the order they were added.
 - `opaque` now puts the window's content material behind the glass, as AppKit does under a sidebar, instead of a solid window-coloured fill. Light glass no longer turns flat grey, and it stays light over a dark wallpaper.
+- Build and test against Electron 44.10.2, which drops the revoked eMudhra intermediate certificates, with the fixed `glob` and `minimatch` releases in the development tools.
 
 ## 0.1.0-rc — 2026-10-18
 
