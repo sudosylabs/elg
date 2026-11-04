@@ -1,6 +1,6 @@
 {
   "name": "@vnilink/elg",
-  "version": "0.1.0-rc",
+  "version": "0.1.0-rc.1",
   "description": "Owned native macOS Liquid Glass attachments for Electron windows",
   "license": "MIT",
   "type": "module",
