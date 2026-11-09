@@ -64,7 +64,7 @@
     "node-addon-api": "8.9.2",
     "node-gyp": "12.4.0",
     "rimraf": "6.1.4",
-    "tsdown": "0.23.1",
+    "tsdown": "0.23.5",
     "typescript": "^5"
   },
   "packageManager": "npm@11.6.2",
