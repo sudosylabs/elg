@@ -58,7 +58,7 @@
     "node-gyp-build": "4.8.4"
   },
   "devDependencies": {
-    "@electron/asar": "4.3.1",
+    "@electron/asar": "4.3.2",
     "@types/node": "^22",
     "electron": "44.10.2",
     "node-addon-api": "8.9.2",
